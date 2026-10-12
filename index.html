@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>서울 응급의료 허브 (119 이송 수요 예측)</title>
+  <!-- 글꼴: Pretendard (jsDelivr) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <style>
+    /* ===== 색과 글꼴 변수: 여기만 바꾸면 전체 분위기가 바뀜 ===== */
+    :root {
+      --paper: #F2F5F9;      /* 바탕 */
+      --white: #FFFFFF;      /* 카드 바탕 */
+      --line: #D3DBE6;       /* 얇은 선 */
+      --ink: #12233F;        /* 제목 (구급 남색) */
+      --text: #2B3546;       /* 본문 */
+      --muted: #5E6A7C;      /* 보조 설명 */
+      --red: #D3261C;        /* 119 빨강 (강조는 여기에만) */
+      --red-soft: #FBE8E6;   /* 최종 모델 행 배경 */
+      --font: "Pretendard", "Malgun Gothic", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; font-family: var(--font); color: var(--text); line-height: 1.7;
+      background: var(--paper);
+      word-break: keep-all;   /* 한글이 단어 중간에서 줄바꿈되지 않게 */
+    }
+    a { color: var(--ink); }
+    :focus-visible { outline: 3px solid var(--red); outline-offset: 3px; }
+
+    /* ===== 상단 고정 메뉴 ===== */
+    nav {
+      position: sticky; top: 0; z-index: 10; background: var(--ink);
+      display: flex; gap: 22px; align-items: center;
+      padding: 12px 24px; overflow-x: auto; white-space: nowrap;
+    }
+    nav strong { color: #fff; margin-right: auto; display: flex; align-items: center; gap: 8px; }
+    nav strong::before {   /* 메뉴 왼쪽 빨간 십자 표시 */
+      content: "+"; display: inline-grid; place-items: center; width: 22px; height: 22px;
+      background: var(--red); color: #fff; font-weight: 800; border-radius: 4px; line-height: 1;
+    }
+    nav a { color: #C9D4E5; text-decoration: none; font-size: 15px; }
+    nav a:hover { color: #fff; }
+
+    /* ===== 공통 섹션 ===== */
+    section { max-width: 1080px; margin: 0 auto; padding: 80px 24px; }
+    h1, h2, h3 { color: var(--ink); line-height: 1.3; letter-spacing: -0.02em; }
+    h2 { font-size: 32px; font-weight: 800; margin: 0 0 8px; }
+    .lead { color: var(--muted); max-width: 660px; margin: 0 0 32px; font-size: 17px; }
+
+    /* ===== 표지 ===== */
+    .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 48px; align-items: center; min-height: 82vh; }
+    .hero h1 { font-size: clamp(36px, 5.2vw, 60px); font-weight: 800; margin: 0 0 12px; letter-spacing: -0.035em; }
+    .hero p { font-size: 18px; margin: 0 0 8px; }
+    .team { color: var(--muted); font-size: 15px !important; }
+
+    /* 심전도 선: 페이지가 열릴 때 한 번만 그려짐 */
+    .ecg { width: 100%; height: 70px; margin: 8px 0 20px; display: block; }
+    .ecg path {
+      fill: none; stroke: var(--red); stroke-width: 3; stroke-linejoin: round; stroke-linecap: round;
+      stroke-dasharray: 1200; stroke-dashoffset: 1200;   /* 선을 숨겨 두었다가 */
+      animation: draw 2.2s ease-out .3s forwards;        /* 0으로 줄이며 그리기 */
+    }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+
+    .btn {
+      display: inline-block; padding: 12px 22px; border: 2px solid var(--red); border-radius: 6px;
+      background: var(--red); color: #fff; text-decoration: none; font-weight: 700; margin: 12px 8px 0 0;
+    }
+    .btn.line { background: transparent; color: var(--ink); border-color: var(--ink); }
+
+    /* ===== 영상·이미지 공통 (클릭하면 확대) ===== */
+    .media { width: 100%; border-radius: 10px; border: 1px solid var(--line); background: var(--white); display: block; cursor: zoom-in; }
+
+    /* ===== 카드 3칸 ===== */
+    .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .card { background: var(--white); border: 1px solid var(--line); border-top: 4px solid var(--ink); border-radius: 6px; padding: 24px; }
+    .card small { color: var(--muted); font-weight: 600; }
+    .card .big { display: block; font-size: 40px; font-weight: 800; color: var(--ink); line-height: 1.2; margin: 8px 0; letter-spacing: -0.03em; }
+    .card p { margin: 0; color: var(--muted); }
+    .card.key { border-top-color: var(--red); }        /* 가장 중요한 숫자 카드 */
+    .card.key .big { color: var(--red); }
+
+    /* ===== 개발 과정: 6단계 (화살표로 연결) ===== */
+    .flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; counter-reset: step; }
+    .box { background: var(--white); border: 1px solid var(--line); border-radius: 6px; padding: 20px 20px 20px 64px; position: relative; }
+    .box::before {   /* 단계 번호 자동 매기기 */
+      counter-increment: step; content: counter(step);
+      position: absolute; left: 18px; top: 18px; width: 32px; height: 32px; border-radius: 50%;
+      background: var(--ink); color: #fff; display: grid; place-items: center; font-weight: 700;
+    }
+    .box.on::before { background: var(--red); }
+    .box b { display: block; color: var(--ink); font-size: 18px; }
+    .box span { color: var(--muted); font-size: 15px; }
+
+    /* ===== 표 ===== */
+    .table-wrap { overflow-x: auto; border-radius: 6px; border: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; background: var(--white); min-width: 560px; }
+    th, td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--line); }
+    th { background: var(--ink); color: #fff; font-weight: 600; }
+    td.num { font-variant-numeric: tabular-nums; }
+    tr.best td { background: var(--red-soft); font-weight: 700; color: var(--ink); }
+    tr.base td { color: var(--muted); }
+    .note { color: var(--muted); font-size: 15px; margin: 14px 0 0; }
+
+    .media.narrow { max-width: 400px; }   /* 세로로 긴 챗봇 캡처는 너무 커지지 않게 */
+
+    /* ===== 막대그래프 (2026 예측) ===== */
+    .bars { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; align-items: end; height: 240px;
+            background: var(--white); border: 1px solid var(--line); border-radius: 6px; padding: 20px 20px 0; }
+    .bar { display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; }
+    .bar i { display: block; width: 70%; background: var(--ink); border-radius: 4px 4px 0 0; height: calc(var(--h) * 0.7); }   /* 높이: --h 값의 70% (숫자·월 글자 자리 남기기) */
+    .bar b { color: var(--ink); font-size: 15px; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+    .bar span { color: var(--muted); font-size: 14px; padding: 8px 0; }
+    .bar.top i { background: var(--red); }
+
+    /* ===== 뉴스 출처 목록 ===== */
+    .sources { list-style: none; padding: 16px 0 0; margin: 24px 0 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+    .sources li { margin: 4px 0; }
+
+    /* ===== 웹 시연 단계 ===== */
+    .step { display: grid; grid-template-columns: 56px 1fr 1.25fr; gap: 24px; padding: 32px 0; border-top: 1px solid var(--line); }
+    .step .no {
+      width: 44px; height: 44px; border-radius: 50%; background: var(--red); color: #fff;
+      display: grid; place-items: center; font-size: 20px; font-weight: 800;
+    }
+    .step h3 { margin: 0 0 8px; }
+    .step ul { margin: 0; padding-left: 18px; color: var(--muted); }
+
+    /* ===== 자료 목록 ===== */
+    .files { list-style: none; padding: 0; margin: 0; background: var(--white); border: 1px solid var(--line); border-radius: 6px; }
+    .files li { display: flex; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+    .files li:last-child { border-bottom: 0; }
+    .files span { color: var(--muted); }
+
+    /* ===== 팀 소개 ===== */
+    .members { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+    .member { background: var(--white); border: 1px solid var(--line); border-radius: 6px; padding: 20px; }
+    .member b { color: var(--ink); font-size: 18px; }
+    .member p { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+
+    /* ===== QR ===== */
+    .try { display: flex; gap: 32px; align-items: center; flex-wrap: wrap; }
+    .try img { width: 180px; border: 1px solid var(--line); border-radius: 6px; background: #fff; padding: 8px; }
+
+    /* ===== 확대 보기 창 ===== */
+    #modal {
+      position: fixed; inset: 0; background: rgba(10,18,32,.9); display: none;
+      align-items: center; justify-content: center; padding: 24px; z-index: 100;
+    }
+    #modal.open { display: flex; }
+    #modal img, #modal video { max-width: 100%; max-height: 90vh; border-radius: 8px; }
+    #modal button { position: absolute; top: 16px; right: 16px; font: inherit; font-size: 15px; padding: 8px 14px; cursor: pointer; border-radius: 6px; border: 0; }
+
+    footer { text-align: center; padding: 40px 24px; color: var(--muted); border-top: 1px solid var(--line); }
+
+    /* ===== 휴대폰 화면: 한 줄로 쌓기 ===== */
+    @media (max-width: 760px) {
+      .hero, .step, .cards, .flow, .members { grid-template-columns: 1fr; }
+      .hero { min-height: auto; }
+      section { padding: 56px 20px; }
+      .bars { gap: 4px; padding: 16px 8px 0; }
+      .bar b { font-size: 11px; }
+    }
+    /* 움직임 줄이기 설정한 사용자 배려 */
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      .ecg path { animation: none; stroke-dashoffset: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 상단 메뉴: href="#아이디" 로 해당 섹션으로 이동 -->
+  <nav>
+    <strong>서울 응급의료 허브</strong>
+    <a href="#why">배경</a>
+    <a href="#result">성과</a>
+    <a href="#process">개발 과정</a>
+    <a href="#model">모델 비교</a>
+    <a href="#web">웹 시연</a>
+    <a href="#next">한계</a>
+    <a href="#files">자료</a>
+    <a href="#try">직접 해보기</a>
+  </nav>
+
+  <!-- ===== 1. 표지 ===== -->
+  <section class="hero" id="top">
+    <div>
+      <h1>이송 수요 예측을 통해<br>골든 타임을 지킬 수 있습니다</h1>
+      <!-- 심전도 모양 선 (장식) -->
+      <svg class="ecg" viewBox="0 0 600 70" aria-hidden="true">
+        <path d="M0 40 H170 L185 40 L195 28 L205 40 H230 L242 6 L256 64 L268 40 H300 L315 32 L330 40 H600"/>
+      </svg>
+      <p>서울 25개 자치구의 119 이송 건수와 생활인구를 예측하고, 실시간 응급실 병상과 함께 웹에서 확인합니다.</p>
+            <p class="team">1조 Project911: 조철현, 신건우, 정지윤, 박채원 / 2026.09.23 ~ 10.12</p>
+      <a class="btn" href="#why">발표 보기</a>
+      <!-- 실제 배포 주소로 바꾸기 -->
+      <a class="btn line" href="https://m.site.naver.com/2ibzL" target="_blank" rel="noopener">대시보드 열기</a>
+    </div>
+    <!-- 표지 영상: 대시보드 화면 녹화 (소리 없이 자동 반복, poster: 영상이 뜨기 전 보이는 사진) -->
+    <video class="media" poster="assets/hero-poster.jpg" autoplay muted loop playsinline
+           aria-label="서울 응급의료 허브 대시보드 사용 화면">
+      <source src="assets/hero.mp4" type="video/mp4">
+    </video>
+  </section>
+
+  <!-- ===== 2. 문제 배경 (뉴스 출처는 아래 sources 목록) ===== -->
+  <section id="why">
+    <h2>전국적으로 나타나는 '응급실 뺑뺑이'</h2>
+    <p class="lead">119 구급대가 환자를 태우고도 받아 줄 응급실을 찾지 못해 다른 병원으로 다시 옮기는 일, 이른바 '응급실 뺑뺑이'가 의료 공백 이후 다시 늘었습니다.</p>
+    <div class="cards">
+      <div class="card key"><small>2024년 응급실 재이송</small><span class="big">5,657건</span><p>2023년 4,227건보다 30% 넘게 증가</p></div>
+      <div class="card"><small>재이송 추이</small><span class="big">반등</span><p>2021년 6,429건 이후 줄던 흐름이 2024년에 다시 증가</p></div>
+      <div class="card"><small>2026년 호남 시범사업</small><span class="big">미수용 0건</span><p>3~5월 광주·전북·전남, 이송이 늦어지면 광역상황실이 병원 선정 지원 (9월 전국 확대)</p></div>
+    </div>
+
+    <h3 style="margin-top:40px">서울 안에서도 수요는 고르지 않습니다</h3>
+    <p class="lead">구급대가 병원을 빨리 찾으려면, 어느 지역에 언제 수요가 몰릴지 미리 아는 것이 출발점입니다.</p>
+    <div class="cards">
+      <div class="card"><small>월평균 이송</small><span class="big">2.4배</span><p>금천구 606건 ~ 강남구 1,425건</p></div>
+      <div class="card"><small>인구 1만 명당 이송률</small><span class="big">1.9배</span><p>송파구 17.8건 ~ 강북구 34.2건</p></div>
+      <div class="card"><small>우리의 접근</small><span class="big">예측 + 병상</span><p>자치구별 이송 수요 예측과 실시간 응급실 병상을 한 화면에</p></div>
+    </div>
+
+    <ul class="sources">
+      <li>뉴스1, 「작년 응급실 뺑뺑이 5657건…」 (2025.09.28) <a href="https://www.news1.kr/bio/welfare-medical/5927548" target="_blank" rel="noopener">기사 보기</a></li>
+      <li>한국일보, 「'응급실 뺑뺑이' 벌써 지난해 85% 넘었다」 (2024.09.11) <a href="https://www.hankookilbo.com/News/Read/A2024091012310003913" target="_blank" rel="noopener">기사 보기</a></li>
+      <li>경향신문, 「상황실이 이송 병원 지정 '응급실 뺑뺑이' 사라졌다」 (2026.06.21) <a href="https://www.khan.co.kr/article/202606212114005" target="_blank" rel="noopener">기사 보기</a></li>
+    </ul>
+  </section>
+
+  <!-- ===== 3. 핵심 성과 ===== -->
+  <section id="result">
+    <h2>핵심 성과</h2>
+    <p class="lead">2025년 6개월 평가 구간 결과입니다. 기준선은 '마지막 달 유지(지난달 값을 그대로 쓰기)'입니다.</p>
+    <div class="cards">
+      <div class="card key"><small>오차 감소</small><span class="big">22%</span><p>MAE 66.4건 → 51.8건 (기준선 대비)</p></div>
+      <div class="card"><small>정확도</small><span class="big">94.59%</span><p>기준선 93.25% 대비 1.34%p 향상</p></div>
+      <div class="card"><small>예측 기간</small><span class="big">6개월</span><p>2026년 1월~6월, 25개 자치구별 월 이송 건수</p></div>
+    </div>
+    <p class="note">평가 구간: 2025년 7~12월 (학습에 쓰지 않은 기간), 정확도 = (1 − MAPE) × 100</p>
+  </section>
+
+  <!-- ===== 4. 개발 과정 (6단계, 번호는 CSS가 자동으로 붙임) ===== -->
+  <section id="process">
+    <h2>개발 과정</h2>
+    <p class="lead">데이터 수집부터 웹 서비스까지의 흐름입니다.</p>
+    <div class="flow">
+      <div class="box"><b>데이터 수집</b><span>소방청 구급활동 공공API, 서울시 구급 출동 현황, 생활인구, 119안전센터</span></div>
+      <div class="box"><b>정제</b><span>열 이름·날짜 통일, 결측 구간 확인, 소방서→자치구 연결</span></div>
+      <div class="box"><b>통합</b><span>자치구 × 월 학습 데이터로 합쳐 ml_data에 저장</span></div>
+      <div class="box"><b>변수 선택</b><span>달력 특성, 이송 이력, 개서 여부, 인구 특성 비교</span></div>
+      <div class="box"><b>모델 학습·검증</b><span>6개 모델과 앙상블 비교, 시간 순서로 학습·검증·평가 분할</span></div>
+      <div class="box on"><b>웹 서비스</b><span>Flask 서버 3개 화면 (메인, 병상 관제, 분석·예측), Vercel 배포</span></div>
+    </div>
+  </section>
+
+  <!-- ===== 5. 분석에서 변수로 ===== -->
+  <section id="insight">
+    <h2>분석에서 변수로</h2>
+    <p class="lead">발견한 패턴을 모델이 쓸 수 있는 변수로 바꿨습니다. 괄호 안은 앙상블 6개월 검증 결과입니다.</p>
+    <div class="table-wrap">
+      <table>
+        <tr><th>발견한 패턴</th><th>모델 변수</th></tr>
+        <tr><td>추세보다 계절성이 뚜렷함</td><td>월 (원-핫 인코딩)</td></tr>
+        <tr><td>자치구마다 이송 규모가 다름</td><td>자치구 (원-핫 인코딩)</td></tr>
+        <tr><td>이번 달은 직전 달과 비슷함</td><td>이송 이력 특성 (지난달 값 등)</td></tr>
+        <tr><td>달의 일수, 주말, 공휴일, 명절에 따라 변동</td><td>일수, 주말 수, 평일 공휴일 수, 명절 연휴 일수 (검증 정확도 93.89% → 94.61%)</td></tr>
+        <tr><td>소방서 개서로 관할이 나뉘며 건수가 바뀜 (금천·구로·성동·광진)</td><td>개서 여부</td></tr>
+        <tr><td>지난달 대비 증감량을 예측하면 검증 정확도 94.23%로 달력보다 낮음</td><td>미채택</td></tr>
+        <tr><td>생활인구를 넣으면 검증 정확도가 0.177%p 낮아짐</td><td>이송 모델에서 제외 (인구 밀집 모델에서 사용)</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== 6. 모델 비교 ===== -->
+  <section id="model">
+    <h2>모델 비교</h2>
+    <p class="lead">이송 건수 모델입니다. 검증 6개월 정확도로 최종 모델을 고르고, 평가 구간으로 성능을 보고했습니다.</p>
+    <!-- 값 출처: transport_model_scores.csv (검증 정확도 순) -->
+    <div class="table-wrap">
+      <table>
+        <tr><th>모델</th><th>검증 6개월 정확도 (%)</th><th>평가 6개월 정확도 (%)</th><th>평가 6개월 MAE (건)</th><th>평가 1개월 정확도 (%)</th></tr>
+        <tr class="best"><td>GradientBoosting + Ridge 앙상블 (최종)</td><td class="num">94.61</td><td class="num">94.59</td><td class="num">51.8</td><td class="num">94.62</td></tr>
+        <tr><td>GradientBoosting</td><td class="num">94.35</td><td class="num">93.27</td><td class="num">62.1</td><td class="num">95.00</td></tr>
+        <tr><td>LinearRegression</td><td class="num">92.78</td><td class="num">87.87</td><td class="num">111.2</td><td class="num">92.19</td></tr>
+        <tr><td>Ridge</td><td class="num">92.73</td><td class="num">94.27</td><td class="num">54.2</td><td class="num">93.59</td></tr>
+        <tr><td>RandomForest</td><td class="num">92.51</td><td class="num">93.98</td><td class="num">54.7</td><td class="num">95.60</td></tr>
+        <tr class="base"><td>기준선 (마지막 달 유지)</td><td class="num">91.82</td><td class="num">93.25</td><td class="num">66.4</td><td class="num">95.41</td></tr>
+        <tr><td>DecisionTree</td><td class="num">91.45</td><td class="num">92.76</td><td class="num">66.5</td><td class="num">95.30</td></tr>
+        <tr><td>DNN (Keras)</td><td class="num">88.96</td><td class="num">91.82</td><td class="num">73.4</td><td class="num">93.49</td></tr>
+        <tr class="base"><td>기준선 (전년 같은 달)</td><td class="num">87.48</td><td class="num">90.68</td><td class="num">90.9</td><td class="num">90.68</td></tr>
+      </table>
+    </div>
+
+    <h3 style="margin-top:40px">인구 밀집 예측</h3>
+    <p class="lead">자치구별 하루 최대 생활인구입니다. 평가 구간은 2025년 8월~2026년 7월 365일입니다.</p>
+    <!-- 값 출처: population_model_scores.csv -->
+    <div class="table-wrap">
+      <table>
+        <tr><th>모델</th><th>검증 정확도 (%)</th><th>평가 정확도 (%)</th><th>평가 MAE (명)</th></tr>
+        <tr class="best"><td>RandomForest (최종)</td><td class="num">98.59</td><td class="num">98.16</td><td class="num">8,836</td></tr>
+        <tr><td>GradientBoosting</td><td class="num">98.36</td><td class="num">97.97</td><td class="num">9,463</td></tr>
+        <tr><td>DNN (Keras)</td><td class="num">98.08</td><td class="num">97.25</td><td class="num">12,804</td></tr>
+        <tr class="base"><td>기준선 (7일 전 그대로)</td><td class="num">97.86</td><td class="num">97.54</td><td class="num">12,015</td></tr>
+        <tr><td>DecisionTree</td><td class="num">97.86</td><td class="num">97.48</td><td class="num">11,685</td></tr>
+        <tr><td>Ridge</td><td class="num">97.34</td><td class="num">97.11</td><td class="num">14,036</td></tr>
+        <tr><td>LinearRegression</td><td class="num">97.33</td><td class="num">97.11</td><td class="num">14,041</td></tr>
+      </table>
+    </div>
+
+    <h3 style="margin-top:40px">2026년 상반기 서울 전체 이송 예측</h3>
+    <p class="lead">25개 자치구 예측을 더한 값입니다. 5월이 가장 많습니다.</p>
+    <!-- 값 출처: transport_forecast_by_gu.csv 월별 합계. 막대 높이(%) = 값 ÷ 25,138 × 100 -->
+    <div class="bars" role="img" aria-label="2026년 1월부터 6월까지 서울 전체 예측 이송 건수 막대그래프">
+      <div class="bar"><b>23,879</b><i style="--h:95%"></i><span>1월</span></div>
+      <div class="bar"><b>21,643</b><i style="--h:86%"></i><span>2월</span></div>
+      <div class="bar"><b>22,570</b><i style="--h:90%"></i><span>3월</span></div>
+      <div class="bar"><b>23,048</b><i style="--h:92%"></i><span>4월</span></div>
+      <div class="bar top"><b>25,138</b><i style="--h:100%"></i><span>5월</span></div>
+      <div class="bar"><b>24,980</b><i style="--h:99%"></i><span>6월</span></div>
+    </div>
+  </section>
+
+  <!-- ===== 7. 웹 시연 (실제 사용 순서라서 번호 사용) ===== -->
+  <section id="web">
+    <h2>이렇게 사용합니다</h2>
+    <p class="lead">서울 응급의료 허브의 실제 화면입니다. 이미지를 누르면 크게 볼 수 있습니다.</p>
+
+    <!-- 단계 하나 = div.step 하나. 단계를 늘리려면 이 블록을 복사해서 붙여 넣기 -->
+    <div class="step">
+      <div class="no">1</div>
+      <div>
+        <h3>메인 화면</h3>
+        <ul>
+          <li>분석·예측, 실시간 병상 관제 두 갈래로 이동</li>
+          <li>오른쪽 아래 챗봇 버튼은 모든 화면에 고정</li>
+        </ul>
+      </div>
+      <img class="media" src="assets/web-01.png" alt="메인 화면: 분석·예측과 병상 관제로 가는 두 카드">
+    </div>
+
+    <div class="step">
+      <div class="no">2</div>
+      <div>
+        <h3>병상 관제</h3>
+        <ul>
+          <li>서울 전체 가용 병상 수와 위험·주의 자치구 수를 한눈에 표시</li>
+          <li>자치구나 병원 이름으로 검색, 1시간마다 갱신</li>
+          <li>23개 구는 국립중앙의료원 실시간 정보</li>
+          <li>강북구·마포구는 등록 응급실 병상 수와 인접 구 실시간 병상 함께 표시</li>
+        </ul>
+      </div>
+      <img class="media" src="assets/web-02.png" alt="병상 관제 화면: 서울 전체 가용 병상과 위험·주의 자치구 수">
+    </div>
+
+    <div class="step">
+      <div class="no">3</div>
+      <div>
+        <h3>분석·예측</h3>
+        <ul>
+          <li>예측 기간 1~6개월 선택, 서울 전체 또는 자치구 선택</li>
+          <li>월평균 예상 이송, 최고 피크 월, 전년 대비 증가율 1위 구, 모델 정확도 카드</li>
+          <li>실적·평가·예측·1년 전 값을 한 그래프로 비교, 자치구별 수요 순위</li>
+        </ul>
+      </div>
+      <img class="media" src="assets/web-03.png" alt="분석·예측 화면: 월별 이송 실적·예측 그래프와 자치구 순위">
+    </div>
+
+    <div class="step">
+      <div class="no">4</div>
+      <div>
+        <h3>응급의료 챗봇 (로컬 버전)</h3>
+        <ul>
+          <li>"신림동 이송 예측"처럼 동 이름을 넣으면 소속 구(관악구)의 6개월 예측 안내</li>
+          <li>가장 많은 달·적은 달, 첫 달 대비 변화율, 최근 3개월 실제값 함께 표시</li>
+          <li>주소나 현재 위치 입력 시 가용 병상 1개 이상인 가까운 응급실 3곳 안내</li>
+          <li>숫자는 코드가 계산하고, 문장 해석만 EXAONE이 담당</li>
+        </ul>
+      </div>
+      <img class="media narrow" src="assets/web-04.png" alt="챗봇에 신림동 이송 예측을 물어본 화면">
+    </div>
+
+    <h3 style="margin-top:40px">화면 뒤의 구조</h3>
+    <div class="table-wrap">
+      <table>
+        <tr><th>구성</th><th>방식</th></tr>
+        <tr><td>예측 결과</td><td>예측 노트북이 dashboard_data.json 저장, 서버가 요청마다 다시 읽음</td></tr>
+        <tr><td>실시간 병상</td><td>1시간 캐시, 전체 갱신 하루 최대 3회, API 호출 하루 100회 제한</td></tr>
+        <tr><td>동 → 자치구 연결</td><td>법정동 373개를 자치구로 바꾸는 표 (dong_to_gu.json)</td></tr>
+        <tr><td>가까운 응급실</td><td>응급실 75곳 좌표와 현재 위치 사이 거리 계산</td></tr>
+        <tr><td>공개 배포</td><td>챗봇을 뺀 대시보드만 Vercel 배포 (용량이 큰 torch·transformers 제외)</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===== 8. 한계와 다음 단계 ===== -->
+  <section id="next">
+    <h2>한계와 다음 검증</h2>
+    <p class="lead">1개월만 예측하면 기준선(95.41%)이 모델(94.62%)보다 조금 높았습니다. 자치구별로는 25곳 중 19곳이 93% 이상이지만 양천구는 90.07%였습니다. 앙상블은 평가 결과를 본 뒤 추가한 후보이며, 최종 선택은 검증 점수로만 했습니다.</p>
+    <div class="cards">
+      <div class="card"><small>데이터</small><span class="big">실시간 공백</span><p>강북구·마포구는 실시간 API 미제공이라 등록 병상 수로만 안내</p></div>
+      <div class="card"><small>모델</small><span class="big">특성 보강</span><p>행사·날씨 등 특성을 더해 1개월 예측에서도 기준선 넘기기</p></div>
+      <div class="card"><small>서비스</small><span class="big">챗봇 공개</span><p>로컬에서만 쓰는 EXAONE 챗봇을 공개판에도 가볍게 연결</p></div>
+    </div>
+  </section>
+
+  <!-- ===== 9. 팀 소개 (역할 출처: 발표 슬라이드 업무 분담표) ===== -->
+  <section id="team">
+    <h2>팀 소개</h2>
+    <div class="members">
+      <div class="member"><b>조철현</b><p>웹 기능 정의, 모델 구현·학습, 데이터→모델→웹 통합, 발표 대본</p></div>
+      <div class="member"><b>신건우</b><p>UI/UX 설계, 웹 기본 구조, 파생변수 생성, 최종 모델 선정</p></div>
+      <div class="member"><b>정지윤</b><p>결측·이상치 처리, 기초 통계 분석, API 연동, PPT 구성·디자인</p></div>
+      <div class="member"><b>박채원</b><p>데이터 정제, 예측 문제 정의, 결과 화면 구현, 웹 기능 테스트</p></div>
+    </div>
+  </section>
+
+  <!-- ===== 10. 자료 다운로드 ===== -->
+  <section id="files">
+    <h2>발표 자료</h2>
+    <p class="lead">결과 보고서와 작업일지를 내려받을 수 있습니다.</p>
+    <ul class="files">
+      <!-- download 속성: 클릭하면 바로 내려받기 -->
+      <li><a href="assets/slides.pdf" download>결과 보고서 (발표 슬라이드, 39쪽)</a><span>PDF</span></li>
+      <li><a href="assets/work-log.pdf" download>작업일지 (7쪽)</a><span>PDF</span></li>
+      <!-- 파일이 더 생기면 li 한 줄을 복사해서 추가 -->
+    </ul>
+  </section>
+
+  <!-- ===== 11. 직접 해보기 (QR) ===== -->
+  <section id="try">
+    <h2>직접 사용해 보세요</h2>
+    <div class="try">
+      <img src="assets/qr.png" alt="project119 대시보드 접속 QR 코드">
+      <div>
+        <p>휴대폰 카메라로 QR을 찍으면 열립니다.</p>
+        <a class="btn" href="https://m.site.naver.com/2ibzL" target="_blank" rel="noopener">대시보드 열기</a>
+        <p class="team">https://m.site.naver.com/2ibzL</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>1조 Project911 (조철현, 신건우, 정지윤, 박채원), 서울 응급의료 허브 / <a href="#top">맨 위로</a></footer>
+
+  <!-- ===== 확대 보기 창 ===== -->
+  <div id="modal" role="dialog" aria-label="크게 보기">
+    <button type="button" id="close">닫기 (Esc)</button>
+    <div id="modal-body"></div>
+  </div>
+
+  <script>
+    // 확대 창 요소 가져오기
+    const modal = document.getElementById("modal");
+    const body = document.getElementById("modal-body");
+
+    // class="media" 영상·이미지를 클릭하면 확대 창에 복사해서 보여주기
+    document.querySelectorAll(".media").forEach(el => {
+      el.addEventListener("click", () => {
+        const copy = el.cloneNode(true);
+        copy.classList.remove("media");
+        if (copy.tagName === "VIDEO") copy.controls = true;   // 확대 시 재생 버튼 표시
+        body.innerHTML = "";
+        body.appendChild(copy);
+        modal.classList.add("open");
+      });
+    });
+
+    // 닫기: 버튼, 바깥 영역 클릭, Esc 키
+    function closeModal() {
+      modal.classList.remove("open");
+      body.innerHTML = "";   // 영상이 뒤에서 계속 재생되지 않게 비우기
+    }
+    document.getElementById("close").addEventListener("click", closeModal);
+    modal.addEventListener("click", e => { if (e.target === modal) closeModal(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+  </script>
+
+</body>
+</html>
